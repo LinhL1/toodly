@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="panel.css">
+  <title>Toodly</title>
+</head>
+<body>
+  <div class="app">
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="tasks">tasks</button>
+      <button class="tab" data-tab="mosaic">mosaic</button>
+    </nav>
+
+    <!-- Tasks view -->
+    <section class="view" id="view-tasks">
+      <form class="add-form" id="add-form">
+        <input class="add-input" type="text" id="add-input"
+               placeholder="add a task…" autocomplete="off">
+        <button class="add-btn" type="submit">+</button>
+      </form>
+      <div class="list-toolbar hidden" id="list-toolbar">
+        <button class="clear-btn" id="clear-completed">clear completed</button>
+      </div>
+      <ul class="todo-list" id="todo-list"></ul>
+    </section>
+
+    <!-- Mosaic view -->
+    <section class="view hidden" id="view-mosaic">
+      <div class="canvas-wrap">
+        <canvas id="mosaic-canvas"></canvas>
+        <div class="empty-state" id="empty-state">
+          <span class="empty-dots">· · · · ·</span>
+          <p>upload an image<br>to begin revealing</p>
+        </div>
+      </div>
+      <div class="mosaic-meta">
+        <p class="progress" id="progress"></p>
+        <label class="upload-label" for="image-upload">↑ upload image</label>
+        <input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp">
+        <p class="hint">complete tasks to reveal dots</p>
+      </div>
+    </section>
+
+  </div>
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
