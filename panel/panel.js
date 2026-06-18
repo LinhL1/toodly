@@ -1,7 +1,8 @@
 import {
   getTodos, addTodo, completeTodo, uncompleteTodo, deleteTodo,
-  clearCompleted, reorderTiedGroup,
+  clearCompleted, reorderTiedGroup, toggleStar,
   getMosaic, setActiveMosaicImage,
+  isExtension,
 } from '../lib/storage.js';
 import { loadImageFile, processImageToDotMap } from '../lib/imageProcessor.js';
 import { renderMosaic } from '../lib/mosaicRenderer.js';
@@ -48,6 +49,7 @@ let dropInfo = null;   // { id, position: 'above'|'below' } of the current targe
 async function init() {
   [todos, mosaic] = await Promise.all([getTodos(), getMosaic()]);
   renderTodos();
+  startClock();
 
   el.addForm.addEventListener('submit', handleAddTodo);
   el.dateToggle.addEventListener('click', handleDateToggle);
@@ -55,7 +57,13 @@ async function init() {
   el.imageUpload.addEventListener('change', handleImageUpload);
   el.tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
 
-  chrome.storage.onChanged.addListener(handleStorageChanged);
+  if (isExtension) {
+    chrome.storage.onChanged.addListener(handleStorageChanged);
+  } else {
+    window.addEventListener('toodly:changed', e =>
+      handleStorageChanged(e.detail.changes, 'local')
+    );
+  }
 
   // Recompute sections in case the panel stays open past midnight.
   setInterval(renderTodos, 3 * 60 * 1000);
@@ -122,6 +130,11 @@ async function handleTodoDelete(id) {
   // onChanged → renderTodos()
 }
 
+async function handleTodoStar(id) {
+  await toggleStar(id);
+  // onChanged → renderTodos()
+}
+
 // ── image upload ──────────────────────────────────────────────────────────────
 
 async function handleImageUpload(e) {
@@ -177,7 +190,7 @@ function buildList(ul, items) {
 
 function buildItem(todo) {
   const li = document.createElement('li');
-  li.className = 'todo-item' + (todo.completed ? ' done' : '');
+  li.className = 'todo-item' + (todo.completed ? ' done' : '') + (todo.starred ? ' starred' : '');
   li.draggable = true;
   li.dataset.id = todo.id;
 
@@ -197,6 +210,12 @@ function buildItem(todo) {
   title.className   = 'todo-title';
   title.textContent = todo.title;
 
+  const star = document.createElement('button');
+  star.className   = 'todo-star' + (todo.starred ? ' is-starred' : '');
+  star.title       = todo.starred ? 'unstar' : 'star';
+  star.textContent = todo.starred ? '★' : '☆';
+  star.addEventListener('click', () => handleTodoStar(todo.id));
+
   const remove = document.createElement('button');
   remove.className   = 'todo-remove';
   remove.title       = 'remove';
@@ -212,7 +231,7 @@ function buildItem(todo) {
     li.appendChild(dateSpan);
   }
 
-  li.appendChild(remove);
+  li.append(star, remove);
   return li;
 }
 
@@ -335,9 +354,59 @@ function formatTodoDate(dateStr, timeStr) {
   return s;
 }
 
+// ── live clock — 7-segment display ───────────────────────────────────────────
+
+// Which segments are lit for each digit 0–9 (standard 7-seg naming: a–g).
+const SEG_MAP = [
+  'abcdef',   // 0
+  'bc',        // 1
+  'abdeg',     // 2
+  'abcdg',     // 3
+  'bcfg',      // 4
+  'acdfg',     // 5
+  'acdefg',    // 6
+  'abc',       // 7
+  'abcdefg',   // 8
+  'abcdfg',    // 9
+];
+
+function startClock() {
+  // Build the 7 segment spans inside each digit container.
+  const digitEls = [0, 1, 2, 3, 4, 5].map(i => {
+    const el = document.getElementById(`d${i}`);
+    for (const s of 'abcdefg') {
+      const span = document.createElement('span');
+      span.className = `seg seg-${s}`;
+      span.dataset.seg = s;
+      el.appendChild(span);
+    }
+    return el;
+  });
+
+  function setDigit(el, n) {
+    const lit = SEG_MAP[n] ?? '';
+    el.querySelectorAll('.seg').forEach(span => {
+      span.classList.toggle('on', lit.includes(span.dataset.seg));
+    });
+  }
+
+  function tick() {
+    const now = new Date();
+    const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+    [Math.floor(h / 10), h % 10,
+     Math.floor(m / 10), m % 10,
+     Math.floor(s / 10), s % 10]
+      .forEach((d, i) => setDigit(digitEls[i], d));
+  }
+
+  tick();
+  setInterval(tick, 1000);
+}
+
 // ── content-script notification ───────────────────────────────────────────────
 
 function notifyContentScript() {
+  if (!isExtension) return;
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     if (!tabs[0]) return;
     chrome.tabs.sendMessage(tabs[0].id, { type: 'TOODLY_TASK_COMPLETED' })

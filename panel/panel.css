@@ -277,6 +277,28 @@ html, body {
   opacity: 0.5;
 }
 
+.todo-star {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+  line-height: 1;
+  transition: opacity 0.12s, color 0.12s;
+  flex-shrink: 0;
+}
+
+.todo-item:hover .todo-star { opacity: 1; }
+.todo-star.is-starred { opacity: 1; color: var(--ink); }
+
+.todo-item.starred .todo-title {
+  font-weight: 700;
+  font-style: italic;
+}
+
 .todo-remove {
   background: none;
   border: none;
@@ -316,6 +338,103 @@ html, body {
   inset: auto 0 0 0;
   height: 2px;
   background: var(--ink);
+}
+
+/* ── live clock — 7-segment display ── */
+
+.live-clock {
+  flex-shrink: 0;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  padding: 18px 14px 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.seg-display {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* One digit cell */
+.seg-digit {
+  position: relative;
+  width: 26px;
+  height: 48px;
+}
+
+/* All segments default to off */
+.seg {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(26, 26, 26, 0.07);
+  transition: background 0.06s;
+}
+
+/* Lit segment */
+.seg.on {
+  background: var(--ink);
+}
+
+/*
+  Segment layout (standard 7-seg naming):
+    aaa
+   f   b
+   f   b
+    ggg
+   e   c
+   e   c
+    ddd
+*/
+
+/* Horizontal bars: a (top), g (middle), d (bottom) */
+.seg-a, .seg-g, .seg-d {
+  left: 4px;
+  right: 4px;
+  height: 5px;
+}
+.seg-a { top: 0; }
+.seg-g { top: calc(50% - 2.5px); }
+.seg-d { bottom: 0; }
+
+/* Top vertical bars: f (left), b (right) */
+.seg-f, .seg-b {
+  top: 4px;
+  bottom: calc(50% + 2px);
+  width: 5px;
+}
+.seg-f { left: 0; }
+.seg-b { right: 0; }
+
+/* Bottom vertical bars: e (left), c (right) */
+.seg-e, .seg-c {
+  top: calc(50% + 2px);
+  bottom: 4px;
+  width: 5px;
+}
+.seg-e { left: 0; }
+.seg-c { right: 0; }
+
+/* Colon dots */
+.seg-colon {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  width: 8px;
+  margin: 0 1px;
+}
+
+.seg-colon i {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink);
+  font-style: normal;
 }
 
 /* ── mosaic: canvas stage ── */
