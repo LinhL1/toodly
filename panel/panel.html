@@ -16,15 +16,37 @@
 
     <!-- Tasks view -->
     <section class="view" id="view-tasks">
+
       <form class="add-form" id="add-form">
-        <input class="add-input" type="text" id="add-input"
-               placeholder="add a task…" autocomplete="off">
-        <button class="add-btn" type="submit">+</button>
+        <div class="add-main-row">
+          <input class="add-input" type="text" id="add-input"
+                 placeholder="add a task…" autocomplete="off">
+          <button class="date-toggle" type="button" id="date-toggle">+ date</button>
+          <button class="add-btn" type="submit">+</button>
+        </div>
+        <div class="add-date-row hidden" id="add-date-row">
+          <input class="date-input" type="date" id="add-date">
+          <input class="time-input" type="time" id="add-time">
+        </div>
       </form>
+
       <div class="list-toolbar hidden" id="list-toolbar">
         <button class="clear-btn" id="clear-completed">clear completed</button>
       </div>
-      <ul class="todo-list" id="todo-list"></ul>
+
+      <div class="tasks-scroll">
+
+        <div class="section" id="section-today">
+          <p class="section-label">today</p>
+          <ul class="todo-list" id="list-today"></ul>
+        </div>
+
+        <div class="section hidden" id="section-archive">
+          <p class="section-label section-label--archive">archive</p>
+          <ul class="todo-list" id="list-archive"></ul>
+        </div>
+
+      </div>
     </section>
 
     <!-- Mosaic view -->
