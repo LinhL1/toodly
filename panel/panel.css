@@ -255,6 +255,7 @@ html, body {
   flex: 1;
   line-height: 1.45;
   word-break: break-word;
+  cursor: text;
 }
 
 .todo-item.done .todo-title {
@@ -271,10 +272,79 @@ html, body {
   letter-spacing: 0.02em;
   padding: 1px 5px;
   border: 1px solid var(--line);
+  cursor: pointer;
+  transition: border-color 0.12s;
 }
+
+.todo-date:hover { border-color: var(--ink); }
 
 .todo-item.done .todo-date {
   opacity: 0.5;
+}
+
+/* hover button for tasks with no date */
+.todo-date-add {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--dim);
+  cursor: pointer;
+  padding: 1px 5px;
+  opacity: 0;
+  flex-shrink: 0;
+  margin-top: 2px;
+  transition: opacity 0.12s;
+}
+
+.todo-item:hover .todo-date-add { opacity: 1; }
+
+/* ── inline task editor ── */
+
+.todo-edit-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.todo-edit-title {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--ink);
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+  padding: 0 0 2px;
+  width: 100%;
+  line-height: 1.45;
+}
+
+.todo-edit-date-row {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  border: 1px solid var(--line);
+}
+
+.todo-edit-date-row .date-input {
+  width: 94px;
+  font-size: 10px;
+  padding: 1px 5px;
+  letter-spacing: 0.02em;
+}
+
+.todo-edit-date-row .time-input {
+  width: 72px;
+  font-size: 10px;
+  padding: 1px 4px;
+  letter-spacing: 0.02em;
+  border-left: 1px solid var(--line);
+  margin-left: 0;
+  padding-left: 4px;
 }
 
 .todo-star {
@@ -437,6 +507,178 @@ html, body {
   font-style: normal;
 }
 
+/* ── timer view ── */
+
+#view-timer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.timer-display-wrap {
+  flex-shrink: 0;
+  padding: 80px 14px 14px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+.timer-display-wrap:hover .seg.on { opacity: 0.75; }
+.timer-display-wrap.editing .seg-display--timer { display: none; }
+
+.timer-input {
+  font-family: 'Menlo', 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 40px;
+  letter-spacing: 6px;
+  text-align: center;
+  background: none;
+  border: none;
+  border-bottom: 2px solid var(--ink);
+  color: var(--ink);
+  width: 180px;
+  outline: none;
+  padding: 4px 8px 6px;
+}
+
+.timer-input::placeholder { color: var(--dim); }
+
+/* Larger segment digits for the main timer display */
+.seg-display--timer .seg-digit {
+  width: 42px;
+  height: 74px;
+}
+
+.seg-display--timer .seg-a,
+.seg-display--timer .seg-g,
+.seg-display--timer .seg-d {
+  left: 6px;
+  right: 6px;
+  height: 7px;
+}
+
+.seg-display--timer .seg-f,
+.seg-display--timer .seg-b {
+  top: 6px;
+  bottom: calc(50% + 3px);
+  width: 7px;
+}
+
+.seg-display--timer .seg-e,
+.seg-display--timer .seg-c {
+  top: calc(50% + 3px);
+  bottom: 6px;
+  width: 7px;
+}
+
+.seg-display--timer .seg-colon {
+  width: 12px;
+  gap: 18px;
+  margin: 0 3px;
+}
+
+.seg-display--timer .seg-colon i {
+  width: 7px;
+  height: 7px;
+}
+
+/* Sand timer canvas — flex fills the space between display and footer */
+.sand-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0 20px;
+}
+
+.sand-sizer {
+  position: relative;
+  width: 100%;
+  max-width: 260px;
+  padding-top: min(100%, 260px); /* square, capped */
+}
+
+#sand-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Duration presets + start/reset */
+.timer-footer {
+  flex-shrink: 0;
+  padding: 12px 14px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timer-presets {
+  display: flex;
+  gap: 8px;
+}
+
+.preset-btn {
+  flex: 1;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dim);
+  padding: 7px 0;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.preset-btn:hover { border-color: var(--ink); color: var(--ink); }
+
+.preset-btn.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
+}
+
+.timer-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.timer-btn {
+  flex: 1;
+  background: var(--ink);
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--bg);
+  padding: 11px 0;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+
+.timer-btn:hover:not(:disabled) { opacity: 0.75; }
+.timer-btn:disabled { opacity: 0.35; cursor: default; }
+
+.timer-btn--ghost {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--dim);
+}
+
+.timer-btn--ghost:hover { border-color: var(--ink); color: var(--ink); }
+
+/* ── mosaic: scroll wrapper ── */
+
+.mosaic-scroll {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
 /* ── mosaic: canvas stage ── */
 
 .canvas-wrap {
@@ -516,4 +758,52 @@ html, body {
   font-size: 10px;
   color: var(--dim);
   letter-spacing: 0.04em;
+}
+
+/* ── focus spiral ── */
+
+.spiral-section {
+  border-top: 1px solid var(--line);
+  padding-bottom: 18px;
+}
+
+.spiral-label {
+  padding: 12px 14px 6px;
+}
+
+.spiral-wrap {
+  padding: 0 14px;
+}
+
+.spiral-sizer {
+  position: relative;
+  width: 100%;
+  padding-top: 100%; /* intrinsic square */
+}
+
+#spiral-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.spiral-meta {
+  font-size: 10px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+  padding: 6px 14px 0;
+}
+
+.spiral-tooltip {
+  position: fixed;
+  background: var(--ink);
+  color: var(--bg);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  pointer-events: none;
+  z-index: 1000;
+  white-space: nowrap;
 }

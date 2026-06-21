@@ -32,12 +32,14 @@ toodly/
 ├── panel/
 │   ├── panel.html             Side panel shell (also shared by widget via relative import)
 │   ├── panel.css              All panel styles (shared by widget)
-│   └── panel.js               Panel logic — tabs, todo list, mosaic view (shared by widget)
+│   └── panel.js               Panel logic — tabs, todo list, mosaic + spiral views (shared by widget)
 ├── lib/
 │   ├── storage.js             Unified storage adapter — chrome.storage.local or localStorage
 │   ├── sections.js            Pure functions: section membership, sorting
 │   ├── imageProcessor.js      Photo → dot-map conversion
-│   └── mosaicRenderer.js      Canvas renderer shared by upload preview and live reveal
+│   ├── mosaicRenderer.js      Canvas renderer shared by upload preview and live reveal
+│   ├── spiralLayout.js        Pure Archimedean spiral geometry (no DOM, no storage)
+│   └── spiralRenderer.js      Canvas renderer for the focus-session spiral
 ├── widget/
 │   └── widget.html            Standalone HTML shell for the Notion embed
 └── icons/
@@ -70,6 +72,8 @@ Toolbar click / character button click
                                                       │
                                          lib/imageProcessor.js
                                          lib/mosaicRenderer.js
+                                         lib/spiralLayout.js
+                                         lib/spiralRenderer.js
                                          lib/sections.js
 
 Notion embed path:
@@ -112,6 +116,7 @@ In extension pages this is always `true`. In a web page (including the Notion wi
 |---|---|---|---|
 | `todos` / `toodly_todos` | `chrome.storage.local` | `localStorage` | Array of todo objects |
 | `mosaic` / `toodly_mosaic` | `chrome.storage.local` | `localStorage` | Full mosaic state |
+| `focusSessions` / `toodly_focusSessions` | `chrome.storage.local` | `localStorage` | Array of FocusSession records |
 
 ### Todo shape
 
@@ -130,6 +135,19 @@ In extension pages this is always `true`. In a web page (including the Notion wi
 }
 ```
 
+### FocusSession shape
+
+```js
+{
+  id: string,           // crypto.randomUUID()
+  date: string,         // 'YYYY-MM-DD', local timezone (same as todo date logic)
+  durationMinutes: number,  // rounded to nearest minute
+  completedAt: number,  // epoch ms
+}
+```
+
+A `FocusSession` is only created when the timer reaches 0 — resetting or closing the panel mid-session creates nothing. There is no archiving concept; the full session history is always retained and is the entire point.
+
 ### The single re-render trigger
 
 `chrome.storage.onChanged` (or the synthetic `toodly:changed` event in the widget) is the only thing that calls `renderTodos()`. Handlers write to storage and stop — they never mutate local state or call render themselves. This eliminates the race condition where an optimistic local push and an `onChanged` callback both render the same new todo and briefly show a duplicate.
@@ -140,11 +158,17 @@ In extension pages this is always `true`. In a web page (including the Notion wi
 
 All section logic is pure — no storage access, no side effects.
 
-### Today vs Archive
+### Today vs Upcoming vs Archive
 
-A todo belongs to **Today** if it has no date, or if its date is today or in the future. A todo belongs to **Archive** if its date is strictly in the past. These are two computed views over the same flat array, recomputed fresh on every render. Section membership is never stored.
+Three sections, computed fresh on every render from the same flat todo array — membership is never stored:
 
-This was a deliberate choice over maintaining two separate stored lists. Stored sections would mean a task crossing midnight would silently stay in Today until the app next ran reconciliation logic. Recomputing from the date field means the view is always correct as long as `renderTodos()` runs — which it does on every storage change and every 3 minutes via `setInterval` to catch day rollover while the panel is open.
+- **Today** — no date (undated tasks), or `date === today`
+- **Upcoming** — `date > today` (future-dated tasks); hidden when empty
+- **Archive** — `date < today` (past-dated); hidden when empty
+
+Order in the UI: Today → Upcoming → Archive.
+
+Keeping membership derived (not stored) means day-rollover is automatic: `renderTodos()` runs on every storage change and on a 3-minute `setInterval`, so an upcoming task silently becomes today's task at midnight without any migration step.
 
 `getTodayDateString()` returns `YYYY-MM-DD` in the user's **local timezone**, not UTC. `toISOString()` returns UTC and would misclassify tasks near midnight in most timezones, so it is deliberately not used.
 
@@ -165,9 +189,15 @@ This was a deliberate choice over maintaining two separate stored lists. Stored 
 
 ### Date and time
 
-Each todo optionally carries a `date` and `time`. Both are set via native `<input type="date">` and `<input type="time">` pickers (not text inputs) — the browser handles formatting, validation, and the calendar/time UI. The pickers are hidden behind a `+ date` toggle to keep the add form minimal for the common case.
+Each todo optionally carries a `date` and `time`. Both are set via native `<input type="date">` and `<input type="time">` pickers — the browser handles formatting, validation, and the calendar/time UI.
 
-Time requires a date; clearing date also clears time. This is enforced in `addTodo()` and `setTodoDateTime()` in `lib/storage.js`.
+**Adding on create:** the add form has a `+ date` toggle that reveals a date picker; the time picker only appears after a date is selected. Time requires a date; clearing date also clears time (enforced in `addTodo()` and `setTodoDateTime()` in `lib/storage.js`).
+
+**Editing after creation:** clicking the task title or date badge opens a full inline editor for that task. The `editingId` module-level variable tracks which todo is in edit mode; `editingFocusDate` (bool) records whether the date input or title input should receive focus when the form renders.
+
+In edit mode `buildItem` renders a `.todo-edit-wrap` (column flex) containing a `.todo-edit-title` text input and a `.todo-edit-date-row` with date/time pickers. The date input shows immediately; the time input is hidden until a date is selected. The `<li>` gets `draggable=false` so drag-and-drop doesn't interfere.
+
+Save paths: Enter on any input, or focus leaving the `<li>` (`focusout` with `relatedTarget` outside the item). Cancel path: Escape. Empty title on save discards and exits without writing. `updateTodo(id, { title, date, time })` in `lib/storage.js` batches all three fields in one write. The double-call guard (`if (editingId !== todo.id) return`) prevents focusout and keydown from both firing save. `handleTodoDelete` clears `editingId` if the deleted task was being edited.
 
 ### Drag-and-drop reorder
 
@@ -182,6 +212,100 @@ The `starred` boolean field on each todo is toggled by `toggleStar(id)`. Starred
 ### Clear completed
 
 `clearCompleted()` removes all completed todos in a single storage write. The "clear completed" toolbar button only appears when at least one completed todo exists, computed on every render.
+
+### Auto-clear from previous days
+
+`clearCompletedBefore(dateStr)` in `lib/storage.js` removes completed todos whose `completedAt` timestamp falls before `dateStr`. It is called at startup (in `init()`) and inside the existing 3-minute day-rollover `setInterval`, so tasks completed on any prior day are swept out automatically — at next open, or at most 3 minutes after midnight while the panel is open. Tasks with `completedAt == null` (edge-case stale data) are kept. The key field used is `completedAt`, not `date` — a task's assigned date is irrelevant; what matters is when it was checked off.
+
+---
+
+## Sand Timer Tab
+
+A third tab ("timer") sits between tasks and mosaic. It provides a session timer for focused work/study with two visual layers: a large 7-segment digital countdown and a dot-grid canvas that acts as a visual sand timer.
+
+### Timer state
+
+Timer state is in-memory only (not persisted to storage). Timers are naturally session-scoped — a restarted browser means a fresh session, so persistence would add complexity with no real value.
+
+```
+timerDuration   — total seconds for the current session
+timerRemaining  — seconds left; decremented by timerTick()
+timerRunning    — boolean
+timerLastMs     — Date.now() snapshot at the last tick
+```
+
+`timerTick()` runs on a 200ms interval but computes elapsed time as `Math.floor((Date.now() - timerLastMs) / 1000)`. It only decrements on whole-second boundaries and advances `timerLastMs` by exactly `delta * 1000`. This prevents drift from `setInterval`'s inherent imprecision — if the tab is backgrounded and intervals fire late, the timer catches up correctly on the next tick.
+
+### Completion alarm
+
+When the timer reaches 0, `startAlarm()` begins a repeating two-tone ring ("di-da": 1000 Hz → 1250 Hz, 400 ms per tone, 500 ms apart, burst every 1.8 s) using the Web Audio API. The alarm continues until the user explicitly resets the timer — `stopAlarm()` is called by `handleTimerReset`, by `handleTimerToggle` when starting a new session (e.g. via Enter on a custom time), and by preset button clicks.
+
+The `AudioContext` (`audioCtx`) is created once inside `handleTimerToggle` the first time the user clicks "start" — a real user gesture. Chrome's autoplay policy blocks `AudioContext` creation inside `setInterval` callbacks (suspended state that can't be resumed without a gesture), so the context must be created and unlocked during the click. `startAlarm` / `playAlarmBurst` then reuse this already-running context, which is why audio works when the timer fires from `setInterval`. No audio file, no extra permissions.
+
+### Preset durations
+
+Three preset buttons (5m, 25m, 50m — covering short break, Pomodoro, and deep-focus block). Clicking a preset while the timer is running is a no-op. When a preset is selected, duration and remaining are both reset.
+
+### 7-segment display (MM:SS)
+
+Reuses the shared `buildSegmentSpans` / `setSegmentDigit` helpers and `SEG_MAP` constant. Four digit elements (`td0`–`td3`) with a single colon. The timer digits are sized larger than the clock digits via `.seg-display--timer` CSS overrides (~42×74px vs 26×48px for the clock).
+
+### Dot hourglass (`drawSandTimer`)
+
+An hourglass-shaped dot grid drawn on `#sand-canvas`. Visual language is identical to the mosaic (same dot sizes, ghost opacity, background colour). The grid uses 10×10 cell positions with only the hourglass-shaped subset drawn; cells outside the shape show the background, giving the outline its form.
+
+Row widths (symmetric about the midpoint): 10, 8, 6, 4, 2 | 2, 4, 6, 8, 10 → 30 cells per half, 60 total.
+
+The animation is split into two independently ordered arrays:
+
+- **`UPPER_CELLS`** (30 cells, row 0 → row 4): ordered top-to-bottom. These start solid. As time passes, cells become ghost starting from row 0 (the top surface falls, like sand draining from a chamber).
+- **`LOWER_CELLS`** (30 cells, row 9 → row 5): ordered bottom-to-top. These start ghost. As time passes, cells become solid starting from row 9 (sand accumulates from the bottom of the lower chamber upward).
+
+At elapsed fraction `f`, `transitioned = round(f × 30)` cells change state in each half simultaneously. This keeps the total solid-dot count constant at 30 throughout — sand is conserved, exactly as in a physical hourglass. At t=50%, the top half is drained down to ~row 2 and the bottom half is filled up to ~row 7, matching a real hourglass at half-time.
+
+### Click-to-edit custom time
+
+Clicking the timer display (when not running) enters edit mode: the seg display hides, a plain text input appears in its place pre-filled with the current `MM:SS` value. Accepts `MM:SS` or bare `MM` (interpreted as minutes). Enter or blur commits; Escape cancels. On commit, `timerDuration` and `timerRemaining` are updated, preset active states are cleared, and the display and hourglass redraw.
+
+### Shared segment helpers
+
+`buildSegmentSpans(digitEl)` and `setSegmentDigit(digitEl, n)` are module-level functions shared between `startClock()` and `initTimer()`. Before this refactor, the segment-building logic was duplicated inline inside `startClock`. Extracting them means new display surfaces (like the timer) don't need to copy the code.
+
+## Focus Session Year Grid
+
+A second visual in the mosaic tab, placed below the task-completion mosaic and separated by a hairline. It shows a compact dot grid for the **current calendar year** — one dot per day, Jan 1 (top-left) to Dec 31 (bottom-right), arranged left-to-right top-to-bottom in a 20-column × 19-row layout that fills the square canvas.
+
+Future slots remain empty and fill in as the year progresses — the growing patch of dots makes time and consistency visible at a glance.
+
+### Data flow
+
+`addFocusSession({ durationMinutes })` is called at the end of `timerTick()` in `panel.js`, only when `timerRemaining === 0`. Resetting the timer or pausing it and closing the panel never creates a session.
+
+`getFocusSessions()` returns the full history. `renderSpiralView()` in `panel.js` filters sessions to the current year before passing them to `renderGrid`. `getFocusDateRange(sessions)` remains in `lib/storage.js` as an exported utility but is no longer used by the grid UI.
+
+### Grid geometry and rendering (`lib/spiralRenderer.js`)
+
+`renderGrid(canvas, sessions, { year })`:
+
+1. Builds a list of all calendar days in `year` (365 or 366 for leap years) using noon timestamps to avoid DST-boundary errors.
+2. Filters sessions to the current year and builds a `minutesByDate` Map.
+3. Layout: `COLS = 20`, `ROWS = ceil(yearLen / 20) = 19`. Cell size = `min((size−16)/20, (size−16)/19)` — largest square cell fitting both axes. Grid is centered in the canvas.
+4. For each day up to and including today: draws a dot with `weight = √(min(minutes, 120) / 120)`, radius `ghostDotR + (maxDotR − ghostDotR) · weight`, opacity `0.07 + 0.78 · weight`. Days with 0 minutes (gap days) get the ghost-dot treatment — small and very faint. Future days are skipped entirely.
+5. Returns `{ dots }` for hover hit-testing. Ghost dots get a minimum hit radius of 5 px so they remain hoverable.
+
+The 120-minute cap keeps one unusually long day from swamping everything else. Square-root curve: 30 min = 50% weight, 60 min = 71%, 120+ min = 100%.
+
+### Hover tooltips
+
+`renderSpiralView()` captures the `dots` array from `renderGrid` into `spiralDots`. A `mousemove` listener on `#spiral-canvas` hit-tests by Euclidean distance and shows `#spiral-tooltip` (a `position: fixed` dark pill) near the cursor. Content is `"jun 15, 2026"` for ghost days and `"jun 15, 2026 · 50m"` for active days. `mouseleave` hides it.
+
+### Live update
+
+When a session is saved, `chrome.storage.onChanged` fires (or `toodly:changed` in the widget). `handleStorageChanged` in `panel.js` catches `changes.focusSessions`, updates the `focusSessions` local cache, and calls `renderSpiralView()` if the mosaic tab is currently visible. Today's dot darkens immediately.
+
+### UI placement
+
+The grid lives inside `#view-mosaic`, wrapped with the task mosaic in `.mosaic-scroll` (`overflow-y: auto`). A `section-label` reading "focus" separates it from the task mosaic above. A one-line caption shows active days, session count, and total minutes for the current year.
 
 ---
 
@@ -221,7 +345,7 @@ The mosaic is the core mechanic: upload a photo, complete tasks, watch the image
 2. **Read pixel data.** `getImageData()` returns the raw RGBA byte array.
 3. **Compute luminance per cell.** Each pixel now represents one grid cell. Perceptual luminance: `L = (0.299·R + 0.587·G + 0.114·B) / 255`.
 4. **Mark exclusions.** Cells with `L > 0.92` (near-white) or `alpha < 10` (near-transparent) are flagged `excluded: true`. Everything else gets `weight = 1 − L` — dark pixels get high weight, bright pixels get low weight.
-5. **Build reveal order.** Uses the **Efraimidis–Spirakis** weighted sampling-without-replacement algorithm: `key = Math.random() ** (1 / (weight + 0.05))`, sort descending. The `+ 0.05` floor ensures even near-white cells eventually appear — they just tend to come last. Dark areas cluster toward the front of the queue naturally, without feeling mechanical or scanline-sequential.
+5. **Build reveal order.** Uses **Efraimidis–Spirakis** weighted sampling (`key = Math.random() ** (1 / (weight + 0.05))`) as a secondary sort within each row, but the primary sort is by `y` descending so the bottom row fills first and the image emerges upward. Dark areas within each row still surface before lighter ones. The `+ 0.05` floor ensures even near-white cells eventually appear.
 
 Output: `{ grid, cells, revealOrder, imageMeta }`. No pixel data is retained.
 
@@ -245,6 +369,8 @@ A 48×27 grid (16:9) produces ~1296 cells, ~60–80 KB in JSON — well within `
 ### Revealing dots (`lib/storage.js → revealNextCell`)
 
 `completeTodo(id)` is the only entry point to reveal a dot. It is idempotent — calling it on an already-completed todo returns `null` without touching the mosaic. On a fresh completion it calls `revealNextCell()`, which reads `revealOrder[nextRevealPointer]`, marks that cell `revealed`, increments the pointer, and persists. If the pointer reaches the end, the image is archived into `completedImages` and `activeImageId` is set to `null`.
+
+`reorderMosaicBottomUp()` is called once at startup to migrate existing mosaics. It rebuilds `revealOrder` as a complete bottom-up sequence of all non-excluded cells (y descending, weight descending within each row), then re-assigns `cell.revealed` so that the first `totalRevealed` positions in that new order are revealed. The dot count (progress) is preserved but which cells are revealed changes — existing dots move to the bottom of the image rather than staying at their original random positions. New uploads get the same ordering from `processImageToDotMap`.
 
 `uncompleteTodo` flips a task back to incomplete but **does not un-reveal a dot**. Earned dots are permanent — unchecking is treated as a misclick, not a reversal of progress.
 

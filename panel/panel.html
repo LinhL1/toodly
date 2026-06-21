@@ -11,6 +11,7 @@
 
     <nav class="tabs">
       <button class="tab active" data-tab="tasks">tasks</button>
+      <button class="tab" data-tab="timer">timer</button>
       <button class="tab" data-tab="mosaic">mosaic</button>
     </nav>
 
@@ -26,7 +27,7 @@
         </div>
         <div class="add-date-row hidden" id="add-date-row">
           <input class="date-input" type="date" id="add-date">
-          <input class="time-input" type="time" id="add-time">
+          <input class="time-input hidden" type="time" id="add-time">
         </div>
       </form>
 
@@ -39,6 +40,11 @@
         <div class="section" id="section-today">
           <p class="section-label">today</p>
           <ul class="todo-list" id="list-today"></ul>
+        </div>
+
+        <div class="section hidden" id="section-upcoming">
+          <p class="section-label">upcoming</p>
+          <ul class="todo-list" id="list-upcoming"></ul>
         </div>
 
         <div class="section hidden" id="section-archive">
@@ -64,24 +70,79 @@
 
     </section>
 
-    <!-- Mosaic view -->
-    <section class="view hidden" id="view-mosaic">
-      <div class="canvas-wrap">
-        <canvas id="mosaic-canvas"></canvas>
-        <div class="empty-state" id="empty-state">
-          <span class="empty-dots">· · · · ·</span>
-          <p>upload an image<br>to begin revealing</p>
+    <!-- Timer view -->
+    <section class="view hidden" id="view-timer">
+
+      <!-- 7-segment countdown — click to set custom time -->
+      <div class="timer-display-wrap" id="timer-display-area" title="click to set time">
+        <div class="seg-display seg-display--timer" id="timer-seg-display">
+          <div class="seg-digit" id="td0"></div>
+          <div class="seg-digit" id="td1"></div>
+          <div class="seg-colon"><i></i><i></i></div>
+          <div class="seg-digit" id="td2"></div>
+          <div class="seg-digit" id="td3"></div>
+        </div>
+        <input class="timer-input hidden" id="timer-input"
+               type="text" placeholder="mm:ss" autocomplete="off" spellcheck="false">
+      </div>
+
+      <!-- Dot hourglass visual -->
+      <div class="sand-wrap">
+        <div class="sand-sizer">
+          <canvas id="sand-canvas"></canvas>
         </div>
       </div>
-      <div class="mosaic-meta">
-        <p class="progress" id="progress"></p>
-        <label class="upload-label" for="image-upload">↑ upload image</label>
-        <input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp">
-        <p class="hint">complete tasks to reveal dots</p>
+
+      <!-- Duration presets + controls -->
+      <div class="timer-footer">
+        <div class="timer-presets">
+          <button class="preset-btn active" data-minutes="25">25m</button>
+          <button class="preset-btn" data-minutes="50">50m</button>
+          <button class="preset-btn" data-minutes="5">5m</button>
+        </div>
+        <div class="timer-controls">
+          <button class="timer-btn" id="timer-toggle">start</button>
+          <button class="timer-btn timer-btn--ghost" id="timer-reset">reset</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Mosaic view -->
+    <section class="view hidden" id="view-mosaic">
+      <div class="mosaic-scroll">
+
+        <!-- Task completion mosaic -->
+        <div class="canvas-wrap">
+          <canvas id="mosaic-canvas"></canvas>
+          <div class="empty-state" id="empty-state">
+            <span class="empty-dots">· · · · ·</span>
+            <p>upload an image<br>to begin revealing</p>
+          </div>
+        </div>
+        <div class="mosaic-meta">
+          <p class="progress" id="progress"></p>
+          <label class="upload-label" for="image-upload">↑ upload image</label>
+          <input type="file" id="image-upload" accept="image/png,image/jpeg,image/webp">
+          <p class="hint">complete tasks to reveal dots</p>
+        </div>
+
+        <!-- Focus session spiral -->
+        <div class="spiral-section">
+          <p class="section-label spiral-label">focus</p>
+          <div class="spiral-wrap">
+            <div class="spiral-sizer">
+              <canvas id="spiral-canvas"></canvas>
+            </div>
+          </div>
+          <p class="spiral-meta" id="spiral-meta"></p>
+        </div>
+
       </div>
     </section>
 
   </div>
+  <div class="spiral-tooltip hidden" id="spiral-tooltip"></div>
   <script type="module" src="panel.js"></script>
 </body>
 </html>
