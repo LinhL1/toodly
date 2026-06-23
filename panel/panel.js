@@ -5,7 +5,7 @@ import {
   getFocusSessions, addFocusSession,
   isExtension,
 } from '../lib/storage.js';
-import { loadImageFile, processImageToDotMap } from '../lib/imageProcessor.js';
+import { loadImageURL, processImageToDotMap } from '../lib/imageProcessor.js';
 import { renderMosaic } from '../lib/mosaicRenderer.js';
 import { renderGrid } from '../lib/spiralRenderer.js';
 import { getTodayDateString, isInToday, isInUpcoming, isInArchive, sortTodos } from '../lib/sections.js';
@@ -29,7 +29,6 @@ const el = {
   canvas:         document.getElementById('mosaic-canvas'),
   emptyState:     document.getElementById('empty-state'),
   progress:       document.getElementById('progress'),
-  imageUpload:    document.getElementById('image-upload'),
   tabs:           document.querySelectorAll('.tab'),
   viewTasks:      document.getElementById('view-tasks'),
   viewTimer:      document.getElementById('view-timer'),
@@ -52,6 +51,7 @@ const el = {
 let todos          = [];
 let mosaic         = null;
 let focusSessions  = [];
+let autoLoadingHeart = false;
 let spiralDots     = [];
 let editingId        = null;  // id of the todo currently open in inline edit mode
 let editingFocusDate = false; // when true, auto-focus the date input instead of the title
@@ -101,6 +101,25 @@ let dragDate = null;   // its date (null = undated)
 let dragTime = null;   // its time (null = untimed)
 let dropInfo = null;   // { id, position: 'above'|'below' } of the current target
 
+// ── auto-load heart ───────────────────────────────────────────────────────────
+
+async function autoLoadHeart() {
+  if (autoLoadingHeart) return;
+  autoLoadingHeart = true;
+  try {
+    const heartUrl = isExtension
+      ? chrome.runtime.getURL('assets/heart.png')
+      : '../assets/heart.png';
+    const img    = await loadImageURL(heartUrl);
+    const dotMap = processImageToDotMap(img);
+    await setActiveMosaicImage(crypto.randomUUID(), dotMap);
+  } catch (err) {
+    console.error('[toodly] failed to load heart.png', err);
+  } finally {
+    autoLoadingHeart = false;
+  }
+}
+
 // ── boot ──────────────────────────────────────────────────────────────────────
 
 async function init() {
@@ -110,6 +129,9 @@ async function init() {
   renderTodos();
   startClock();
   initTimer();
+
+  // Auto-load the fixed heart image if there's no active mosaic yet.
+  if (!mosaic || !mosaic.activeImageId) autoLoadHeart();
 
   el.addForm.addEventListener('submit', handleAddTodo);
   el.dateToggle.addEventListener('click', handleDateToggle);
@@ -128,7 +150,6 @@ async function init() {
     });
   });
   el.clearCompleted.addEventListener('click', () => clearCompleted());
-  el.imageUpload.addEventListener('change', handleImageUpload);
   el.tabs.forEach(tab => tab.addEventListener('click', handleTabClick));
 
   if (el.spiralCanvas) {
@@ -219,24 +240,6 @@ async function handleTodoStar(id) {
   // onChanged → renderTodos()
 }
 
-// ── image upload ──────────────────────────────────────────────────────────────
-
-async function handleImageUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  el.progress.textContent = 'processing…';
-  try {
-    const img    = await loadImageFile(file);
-    const dotMap = processImageToDotMap(img);
-    const id     = crypto.randomUUID();
-    await setActiveMosaicImage(id, dotMap);
-  } catch (err) {
-    el.progress.textContent = 'could not process image';
-    console.error('[toodly]', err);
-  }
-  e.target.value = '';
-}
-
 // ── storage change listener ───────────────────────────────────────────────────
 
 function handleStorageChanged(changes, area) {
@@ -247,7 +250,11 @@ function handleStorageChanged(changes, area) {
   }
   if (changes.mosaic) {
     mosaic = changes.mosaic.newValue ?? null;
-    if (!el.viewMosaic.classList.contains('hidden')) renderMosaicView();
+    if (!mosaic || !mosaic.activeImageId) {
+      autoLoadHeart();
+    } else if (!el.viewMosaic.classList.contains('hidden')) {
+      renderMosaicView();
+    }
   }
   if (changes.focusSessions) {
     focusSessions = changes.focusSessions.newValue ?? [];
@@ -516,23 +523,7 @@ function clearDragState() {
 // ── mosaic rendering ──────────────────────────────────────────────────────────
 
 function renderMosaicView() {
-  if (!mosaic) {
-    el.emptyState.classList.remove('hidden');
-    el.progress.textContent = '';
-    clearCanvas();
-    return;
-  }
-
-  if (!mosaic.activeImageId && mosaic.cells?.length) {
-    el.emptyState.classList.add('hidden');
-    el.progress.textContent = 'complete — upload a new image to continue';
-    requestAnimationFrame(() =>
-      renderMosaic(el.canvas, mosaic, { showGhost: false, previewAll: true })
-    );
-    return;
-  }
-
-  if (!mosaic.activeImageId) {
+  if (!mosaic || !mosaic.activeImageId) {
     el.emptyState.classList.remove('hidden');
     el.progress.textContent = '';
     clearCanvas();
@@ -541,8 +532,9 @@ function renderMosaicView() {
 
   el.emptyState.classList.add('hidden');
   el.progress.textContent = `${mosaic.totalRevealed} / ${mosaic.revealOrder.length} revealed`;
+  const completedCount = mosaic.completedImages?.length ?? 0;
   requestAnimationFrame(() =>
-    renderMosaic(el.canvas, mosaic, { showGhost: true, previewAll: false })
+    renderMosaic(el.canvas, mosaic, { showGhost: true, previewAll: false, completedCount })
   );
 }
 
@@ -671,6 +663,17 @@ function initTimer() {
 
   el.timerToggle.addEventListener('click', handleTimerToggle);
   el.timerReset.addEventListener('click', handleTimerReset);
+
+  // Space bar toggles pause/resume while the timer is running.
+  // Ignored when an input or textarea has focus so typing isn't intercepted.
+  document.addEventListener('keydown', e => {
+    if (e.key !== ' ') return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (!timerRunning && timerRemaining === timerDuration) return; // not yet started
+    e.preventDefault();
+    handleTimerToggle();
+  });
 
   // Click display to enter custom-time edit mode (only when not running).
   el.timerDisplayArea.addEventListener('click', () => {

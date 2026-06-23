@@ -244,7 +244,7 @@ The `AudioContext` (`audioCtx`) is created once inside `handleTimerToggle` the f
 
 ### Preset durations
 
-Three preset buttons (5m, 25m, 50m — covering short break, Pomodoro, and deep-focus block). Clicking a preset while the timer is running is a no-op. When a preset is selected, duration and remaining are both reset.
+Three preset buttons (15m, 30m, 45m — covering short break, Pomodoro, and deep-focus block). Clicking a preset while the timer is running is a no-op. When a preset is selected, duration and remaining are both reset.
 
 ### 7-segment display (MM:SS)
 
@@ -333,11 +333,21 @@ The dual-backend storage adapter in `lib/storage.js` is what makes this possible
 
 ## The Mosaic — How It Works
 
-The mosaic is the core mechanic: upload a photo, complete tasks, watch the image emerge as a dot grid one dot at a time.
+The mosaic is the core mechanic: complete tasks, watch a heart emerge as a dot grid one dot at a time. The image is fixed — `assets/heart.png` is always the target. There is no upload UI.
+
+When the heart is fully revealed, a new one starts automatically and the completed heart is drawn as a semi-transparent ghost layer behind the active one. Multiple completions stack: each adds another 10% opacity to the background ghost, capped at 45%. This makes repeated progress visible without obscuring the active heart.
+
+### Auto-load (`panel.js → autoLoadHeart`)
+
+`autoLoadHeart()` resolves the URL for `heart.png` (extension context: `chrome.runtime.getURL('assets/heart.png')`; widget context: `'../assets/heart.png'`), loads it via `loadImageURL`, converts it to a dot map, and calls `setActiveMosaicImage`. It is called in two places:
+- `init()` — on first load, if no active mosaic exists yet
+- `handleStorageChanged` — when a mosaic change arrives with `!activeImageId` (i.e., the heart just completed)
+
+A boolean guard `autoLoadingHeart` prevents concurrent calls.
 
 ### Image processing (`lib/imageProcessor.js`)
 
-`loadImageFile(file)` decodes the file into an `HTMLImageElement` via a temporary object URL — no server, no FileReader.
+`loadImageURL(url)` loads an `HTMLImageElement` from a URL string — used for the fixed heart asset. `loadImageFile(file)` (File → object URL path) is retained but no longer called.
 
 `processImageToDotMap(img, gridCols=48)` does five things:
 
@@ -376,14 +386,9 @@ A 48×27 grid (16:9) produces ~1296 cells, ~60–80 KB in JSON — well within `
 
 ### Rendering (`lib/mosaicRenderer.js`)
 
-`renderMosaic(canvas, mosaic, { showGhost, previewAll })` is used in two modes:
+`renderMosaic(canvas, mosaic, { showGhost, previewAll, completedCount })` renders in one mode (live reveal):
 
-| Mode | `previewAll` | `showGhost` | Used when |
-|---|---|---|---|
-| Live reveal | `false` | `true` | Normal mosaic view while in progress |
-| Completed preview | `true` | `false` | Image fully revealed |
-
-Each call: sets physical canvas size via `devicePixelRatio` for HiDPI sharpness; fills `#fafaf8`; iterates cells (skipping excluded ones); draws revealed cells as filled circles at 22% of the smaller cell dimension; draws unrevealed cells (when `showGhost`) at half radius and 7% opacity. One renderer, two modes — no duplication.
+Each call: sets physical canvas size via `devicePixelRatio` for HiDPI sharpness; fills `#fafaf8`; if `completedCount > 0`, draws all non-excluded cells at `min(completedCount × 0.1, 0.45)` opacity as the background ghost layer; then iterates cells drawing revealed ones at full opacity and unrevealed ghost dots at half-radius and 7% opacity. The `previewAll` path is still present but unused now that hearts auto-restart.
 
 ### Completion feedback
 
@@ -399,7 +404,7 @@ The panel is a Chrome side panel (`chrome.sidePanel` API), staying open while th
 
 **Tasks** — add-task input with an optional `+ date` row (native date/time pickers, hidden by default); scrollable list split into Today and Archive sections; "clear completed" toolbar (shown only when completed tasks exist); starred tasks appear bold and italic at the top of their section; live 7-segment clock at the bottom.
 
-**Mosaic** — intrinsic-square canvas (`padding-top: 100%` trick), upload control, progress counter.
+**Mosaic** — intrinsic-square canvas (`padding-top: 100%` trick), progress counter ("N / M revealed"). No upload control — the image is always `assets/heart.png`, loaded automatically.
 
 ---
 
