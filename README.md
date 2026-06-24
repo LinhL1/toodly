@@ -2,7 +2,7 @@
 
 **Chrome Browser Extension**
 
-Ultimate to-do manager built directly into your browser for easy access to tasks
+My superior, simple, but gets-the-job-done task manager. To-doing built directly into your browser for easy access to tasks while you work
 
 ## To-Do
 - Set due dates and deadlines
