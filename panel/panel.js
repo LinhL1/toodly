@@ -4,7 +4,7 @@ import {
   getMosaic, setActiveMosaicImage, reorderMosaicBottomUp,
   getFocusSessions, addFocusSession,
   getGroups, createGroup, addTaskToGroup, removeTaskFromGroup,
-  dissolveGroup, renameGroup, reorderGroupTasks, toggleGroupCollapsed,
+  dissolveGroup, renameGroup, reorderGroupTasks, toggleGroupCollapsed, toggleGroupPinned,
   isExtension,
 } from '../lib/storage.js';
 import { loadImageURL, processImageToDotMap } from '../lib/imageProcessor.js';
@@ -23,6 +23,8 @@ const el = {
   addTime:        document.getElementById('add-time'),
   listToolbar:      document.getElementById('list-toolbar'),
   clearCompleted:   document.getElementById('clear-completed'),
+  sectionPinned:    document.getElementById('section-pinned'),
+  listPinned:       document.getElementById('list-pinned'),
   sectionGroups:    document.getElementById('section-groups'),
   listGroups:       document.getElementById('list-groups'),
   listToday:        document.getElementById('list-today'),
@@ -285,13 +287,19 @@ function renderTodos() {
   const inUpcoming = ungrouped.filter(t => isInUpcoming(t, today));
   const inArchive  = ungrouped.filter(t => isInArchive(t, today));
 
+  const byOrder = (a, b) => (a.manualOrder ?? 0) - (b.manualOrder ?? 0);
+  const pinnedGroups  = groups.filter(g =>  g.pinnedAboveToday).sort(byOrder);
+  const regularGroups = groups.filter(g => !g.pinnedAboveToday).sort(byOrder);
+
   const hasCompleted = todos.some(t => t.completed);
   el.listToolbar.classList.toggle('hidden', !hasCompleted);
-  el.sectionGroups.classList.toggle('hidden', groups.length === 0);
+  el.sectionPinned.classList.toggle('hidden',  pinnedGroups.length === 0);
+  el.sectionGroups.classList.toggle('hidden',  regularGroups.length === 0);
   el.sectionUpcoming.classList.toggle('hidden', inUpcoming.length === 0);
   el.sectionArchive.classList.toggle('hidden',  inArchive.length === 0);
 
-  buildGroupList(el.listGroups, sorted);
+  buildGroupList(el.listPinned,  sorted, pinnedGroups);
+  buildGroupList(el.listGroups,  sorted, regularGroups);
   buildList(el.listToday,    inToday);
   buildList(el.listUpcoming, inUpcoming);
   buildList(el.listArchive,  inArchive);
@@ -302,15 +310,14 @@ function buildList(ul, items) {
   for (const todo of items) ul.appendChild(buildItem(todo));
 }
 
-function buildGroupList(ul, sortedTodos) {
+function buildGroupList(ul, sortedTodos, groupList) {
   ul.innerHTML = '';
-  const sorted = [...groups].sort((a, b) => (a.manualOrder ?? 0) - (b.manualOrder ?? 0));
-  for (const group of sorted) ul.appendChild(buildGroupItem(group, sortedTodos));
+  for (const group of groupList) ul.appendChild(buildGroupItem(group, sortedTodos));
 }
 
 function buildGroupItem(group, sortedTodos) {
   const li = document.createElement('li');
-  li.className = 'group-item';
+  li.className = 'group-item' + (group.pinnedAboveToday ? ' group-item--pinned' : '');
   li.dataset.groupId = group.id;
 
   // ── header ──────────────────────────────────────────────────────────────────
@@ -361,12 +368,19 @@ function buildGroupItem(group, sortedTodos) {
     nameSpan.textContent = group.name;
     nameSpan.addEventListener('click', () => { editingGroupId = group.id; renderTodos(); });
 
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'group-pin';
+    pinBtn.title     = group.pinnedAboveToday ? 'unpin from top' : 'pin above today';
+    pinBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="3.5" cy="3.5" r="2.5" fill="currentColor"/><line x1="5.5" y1="5.5" x2="8.5" y2="8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    pinBtn.addEventListener('click', () => toggleGroupPinned(group.id));
+
     const ungroupBtn = document.createElement('button');
     ungroupBtn.className   = 'group-ungroup';
     ungroupBtn.textContent = 'ungroup';
     ungroupBtn.addEventListener('click', () => dissolveGroup(group.id));
 
     header.appendChild(nameSpan);
+    header.appendChild(pinBtn);
     header.appendChild(ungroupBtn);
   }
 

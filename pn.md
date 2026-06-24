@@ -228,12 +228,13 @@ Groups cluster related tasks under a named heading. They render above all sectio
 ```js
 // storage key: 'groups'
 {
-  id:          string,    // crypto.randomUUID()
-  name:        string,    // user-editable; defaults to 'group' on creation
-  taskIds:     string[],  // ordered member task ids
-  collapsed:   boolean,   // UI state — false on creation
-  createdAt:   number,    // Date.now()
-  manualOrder: number,    // position within the groups list
+  id:               string,   // crypto.randomUUID()
+  name:             string,   // user-editable; defaults to 'group' on creation
+  taskIds:          string[], // ordered member task ids
+  collapsed:        boolean,  // UI state — false on creation
+  pinnedAboveToday: boolean,  // true → renders above Today section; false → below
+  createdAt:        number,   // Date.now()
+  manualOrder:      number,   // position within the groups list
 }
 ```
 
@@ -251,9 +252,11 @@ Each todo gains `groupId: string | null` (null = ungrouped). Existing tasks with
 
 **Empty group auto-delete:** All storage operations that remove tasks from groups (`removeTaskFromGroup`, `deleteTodo`, `dissolveGroup`) filter out groups with zero `taskIds` before writing.
 
-### Rename and ungroup
+### Rename, ungroup, and pin
 
 Click the group name → inline text input (same pattern as task inline edit). Enter saves, Escape cancels, blur saves. The `[ungroup]` button (revealed on header hover) calls `dissolveGroup` — clears all member `groupId`s and removes the group in one atomic write.
+
+The `[pin]` / `[unpin]` button (also revealed on hover, before the ungroup button) toggles `group.pinnedAboveToday` via `toggleGroupPinned` in `storage.js`. Pinned groups render in a separate `#section-pinned` container that sits above `#section-today` in the DOM, so they always appear first. Non-pinned groups remain in `#section-groups` below Today. When a group is pinned, its header left-border becomes `var(--ink)` and the "unpin" label is shown at reduced opacity at rest (no hover needed) so the pinned state is visually obvious. `renderTodos` splits `groups` into `pinnedGroups` / `regularGroups` by the flag, sorts each by `manualOrder`, and passes each slice to `buildGroupList`. The group data shape now includes `pinnedAboveToday: boolean` (defaults `false` on creation).
 
 ### Drop zone detection
 
