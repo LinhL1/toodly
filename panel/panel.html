@@ -22,7 +22,7 @@
         <div class="add-main-row">
           <input class="add-input" type="text" id="add-input"
                  placeholder="add a task…" autocomplete="off">
-          <button class="date-toggle" type="button" id="date-toggle">+ date</button>
+          <button class="date-toggle" type="button" id="date-toggle">date</button>
           <button class="add-btn" type="submit">+</button>
         </div>
         <div class="add-date-row hidden" id="add-date-row">
@@ -40,6 +40,11 @@
         <div class="section" id="section-today">
           <p class="section-label">today</p>
           <ul class="todo-list" id="list-today"></ul>
+        </div>
+
+        <div class="section hidden" id="section-groups">
+          <p class="section-label">groups</p>
+          <ul class="todo-list group-list" id="list-groups"></ul>
         </div>
 
         <div class="section hidden" id="section-upcoming">

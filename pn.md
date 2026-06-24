@@ -219,6 +219,58 @@ The `starred` boolean field on each todo is toggled by `toggleStar(id)`. Starred
 
 ---
 
+## Task Groups
+
+Groups cluster related tasks under a named heading. They render above all section headers (Today / Upcoming / Archive) regardless of the dates their member tasks carry — group membership takes priority over section placement.
+
+### Data shape
+
+```js
+// storage key: 'groups'
+{
+  id:          string,    // crypto.randomUUID()
+  name:        string,    // user-editable; defaults to 'group' on creation
+  taskIds:     string[],  // ordered member task ids
+  collapsed:   boolean,   // UI state — false on creation
+  createdAt:   number,    // Date.now()
+  manualOrder: number,    // position within the groups list
+}
+```
+
+Each todo gains `groupId: string | null` (null = ungrouped). Existing tasks without the field are treated as `null` — no migration write needed until the user creates a group. `deleteTodo`, `createGroup`, `addTaskToGroup`, and `removeTaskFromGroup` all write `todos` and `groups` atomically via `setMultiple` to keep them in sync.
+
+### Grouping flow
+
+**Creating a group:** Drag a task and drop it onto the center zone (middle 60% of the target's height) of another task. The target task shows an inline confirm row — `group with "[name]"? [yes] [no]`. On yes, `createGroup` is called and the new group's name field opens immediately for editing. On no, state resets with no change.
+
+**Adding to an existing group:** Drop any task onto the group's header (drop-onto highlight appears on the header) or onto any task already inside a group (center zone). No confirm — intent is unambiguous. Handled by `addTaskToGroup`, which also removes the task from any prior group and auto-deletes the prior group if empty.
+
+**Drag-reorder within a group:** above/below zones on group member tasks reorder `group.taskIds` via `reorderGroupTasks`.
+
+**Drag out of a group:** drag a group member and drop it in above/below position onto an ungrouped task. Calls `removeTaskFromGroup` (task returns to the flat list at its natural sort position). Auto-deletes the group if it becomes empty.
+
+**Empty group auto-delete:** All storage operations that remove tasks from groups (`removeTaskFromGroup`, `deleteTodo`, `dissolveGroup`) filter out groups with zero `taskIds` before writing.
+
+### Rename and ungroup
+
+Click the group name → inline text input (same pattern as task inline edit). Enter saves, Escape cancels, blur saves. The `[ungroup]` button (revealed on header hover) calls `dissolveGroup` — clears all member `groupId`s and removes the group in one atomic write.
+
+### Drop zone detection
+
+```
+top 20%    → 'above'  (reorder)
+middle 60% → 'onto'   (group trigger or add-to-group)
+bottom 20% → 'below'  (reorder)
+```
+
+Constants `ONTO_TOP = 0.2` and `ONTO_BOT = 0.8` in `panel.js`. The existing same-`(date, time)` reorder gate is bypassed for group member drags, allowing them to be dropped anywhere.
+
+### Storage
+
+Two keys: `todos` (existing) and `groups` (new). Stored in `chrome.storage.local` (10 MB limit). Atomic multi-key writes use `setMultiple(obj)` in `storage.js`. `handleStorageChanged` in `panel.js` handles `changes.groups` and re-renders.
+
+---
+
 ## Sand Timer Tab
 
 A third tab ("timer") sits between tasks and mosaic. It provides a session timer for focused work/study with two visual layers: a large 7-segment digital countdown and a dot-grid canvas that acts as a visual sand timer.

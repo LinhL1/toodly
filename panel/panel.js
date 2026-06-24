@@ -3,6 +3,8 @@ import {
   clearCompleted, clearCompletedBefore, reorderTiedGroup, toggleStar, updateTodo,
   getMosaic, setActiveMosaicImage, reorderMosaicBottomUp,
   getFocusSessions, addFocusSession,
+  getGroups, createGroup, addTaskToGroup, removeTaskFromGroup,
+  dissolveGroup, renameGroup, reorderGroupTasks, toggleGroupCollapsed,
   isExtension,
 } from '../lib/storage.js';
 import { loadImageURL, processImageToDotMap } from '../lib/imageProcessor.js';
@@ -21,6 +23,8 @@ const el = {
   addTime:        document.getElementById('add-time'),
   listToolbar:      document.getElementById('list-toolbar'),
   clearCompleted:   document.getElementById('clear-completed'),
+  sectionGroups:    document.getElementById('section-groups'),
+  listGroups:       document.getElementById('list-groups'),
   listToday:        document.getElementById('list-today'),
   listUpcoming:     document.getElementById('list-upcoming'),
   listArchive:      document.getElementById('list-archive'),
@@ -51,10 +55,13 @@ const el = {
 let todos          = [];
 let mosaic         = null;
 let focusSessions  = [];
+let groups         = [];
 let autoLoadingHeart = false;
 let spiralDots     = [];
 let editingId        = null;  // id of the todo currently open in inline edit mode
 let editingFocusDate = false; // when true, auto-focus the date input instead of the title
+let editingGroupId   = null;  // id of the group whose name is being edited inline
+let pendingGroup     = null;  // { draggedId, targetId } — awaiting user grouping confirm
 
 // ── timer state ───────────────────────────────────────────────────────────────
 
@@ -96,10 +103,11 @@ const HGLASS_HALF = 30;
 
 // ── drag state ────────────────────────────────────────────────────────────────
 
-let dragId   = null;   // id of the item being dragged
-let dragDate = null;   // its date (null = undated)
-let dragTime = null;   // its time (null = untimed)
-let dropInfo = null;   // { id, position: 'above'|'below' } of the current target
+let dragId      = null;  // id of the item being dragged
+let dragDate    = null;  // its date (null = undated)
+let dragTime    = null;  // its time (null = untimed)
+let dragGroupId = null;  // groupId of the dragged item, or null
+let dropInfo    = null;  // { id, position: 'above'|'below'|'onto' } of the current target
 
 // ── auto-load heart ───────────────────────────────────────────────────────────
 
@@ -123,7 +131,7 @@ async function autoLoadHeart() {
 // ── boot ──────────────────────────────────────────────────────────────────────
 
 async function init() {
-  [todos, mosaic, focusSessions] = await Promise.all([getTodos(), getMosaic(), getFocusSessions()]);
+  [todos, mosaic, focusSessions, groups] = await Promise.all([getTodos(), getMosaic(), getFocusSessions(), getGroups()]);
   await clearCompletedBefore(getTodayDateString()); // sweep tasks completed on prior days
   await reorderMosaicBottomUp();                    // migrate existing mosaic to bottom-up fill
   renderTodos();
@@ -231,6 +239,7 @@ async function handleTodoCheck(id, checked) {
 
 async function handleTodoDelete(id) {
   if (editingId === id) editingId = null;
+  if (pendingGroup?.draggedId === id || pendingGroup?.targetId === id) pendingGroup = null;
   await deleteTodo(id);
   // onChanged → renderTodos()
 }
@@ -246,6 +255,10 @@ function handleStorageChanged(changes, area) {
   if (area !== 'local') return;
   if (changes.todos) {
     todos = changes.todos.newValue ?? [];
+    renderTodos();
+  }
+  if (changes.groups) {
+    groups = changes.groups.newValue ?? [];
     renderTodos();
   }
   if (changes.mosaic) {
@@ -267,15 +280,18 @@ function handleStorageChanged(changes, area) {
 function renderTodos() {
   const today      = getTodayDateString();
   const sorted     = sortTodos(todos);
-  const inToday    = sorted.filter(t => isInToday(t, today));
-  const inUpcoming = sorted.filter(t => isInUpcoming(t, today));
-  const inArchive  = sorted.filter(t => isInArchive(t, today));
+  const ungrouped  = sorted.filter(t => !t.groupId);
+  const inToday    = ungrouped.filter(t => isInToday(t, today));
+  const inUpcoming = ungrouped.filter(t => isInUpcoming(t, today));
+  const inArchive  = ungrouped.filter(t => isInArchive(t, today));
 
   const hasCompleted = todos.some(t => t.completed);
   el.listToolbar.classList.toggle('hidden', !hasCompleted);
+  el.sectionGroups.classList.toggle('hidden', groups.length === 0);
   el.sectionUpcoming.classList.toggle('hidden', inUpcoming.length === 0);
   el.sectionArchive.classList.toggle('hidden',  inArchive.length === 0);
 
+  buildGroupList(el.listGroups, sorted);
   buildList(el.listToday,    inToday);
   buildList(el.listUpcoming, inUpcoming);
   buildList(el.listArchive,  inArchive);
@@ -286,7 +302,143 @@ function buildList(ul, items) {
   for (const todo of items) ul.appendChild(buildItem(todo));
 }
 
+function buildGroupList(ul, sortedTodos) {
+  ul.innerHTML = '';
+  const sorted = [...groups].sort((a, b) => (a.manualOrder ?? 0) - (b.manualOrder ?? 0));
+  for (const group of sorted) ul.appendChild(buildGroupItem(group, sortedTodos));
+}
+
+function buildGroupItem(group, sortedTodos) {
+  const li = document.createElement('li');
+  li.className = 'group-item';
+  li.dataset.groupId = group.id;
+
+  // ── header ──────────────────────────────────────────────────────────────────
+  const header = document.createElement('div');
+  header.className = 'group-header';
+
+  const toggle = document.createElement('button');
+  toggle.className   = 'group-toggle';
+  toggle.textContent = group.collapsed ? '▸' : '▾';
+  toggle.addEventListener('click', () => toggleGroupCollapsed(group.id));
+
+  header.appendChild(toggle);
+
+  if (editingGroupId === group.id) {
+    const input = document.createElement('input');
+    input.type         = 'text';
+    input.className    = 'group-name-input';
+    input.value        = group.name;
+    input.autocomplete = 'off';
+
+    let closed = false;
+    const doSave = () => {
+      if (closed) return; closed = true;
+      const n = input.value.trim();
+      editingGroupId = null;
+      if (n) {
+        const g = groups.find(g => g.id === group.id);
+        if (g) g.name = n; // optimistic local update
+        renameGroup(group.id, n); // persist async
+      }
+      renderTodos();
+    };
+    const doCancel = () => {
+      if (closed) return; closed = true;
+      editingGroupId = null;
+      renderTodos();
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
+      if (e.key === 'Escape') { e.preventDefault(); doCancel(); }
+    });
+    input.addEventListener('blur', doSave);
+    header.appendChild(input);
+    requestAnimationFrame(() => { input.focus(); input.select(); });
+  } else {
+    const nameSpan = document.createElement('span');
+    nameSpan.className   = 'group-name';
+    nameSpan.textContent = group.name;
+    nameSpan.addEventListener('click', () => { editingGroupId = group.id; renderTodos(); });
+
+    const ungroupBtn = document.createElement('button');
+    ungroupBtn.className   = 'group-ungroup';
+    ungroupBtn.textContent = 'ungroup';
+    ungroupBtn.addEventListener('click', () => dissolveGroup(group.id));
+
+    header.appendChild(nameSpan);
+    header.appendChild(ungroupBtn);
+  }
+
+  // ── header as drop target (add any dragged task to this group) ───────────────
+  header.addEventListener('dragover', e => {
+    if (!dragId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    clearDropIndicators();
+    header.classList.add('drop-onto');
+  });
+  header.addEventListener('dragleave', e => {
+    if (!header.contains(e.relatedTarget)) header.classList.remove('drop-onto');
+  });
+  header.addEventListener('drop', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    header.classList.remove('drop-onto');
+    if (dragId) addTaskToGroup(dragId, group.id);
+    clearDragState();
+  });
+
+  li.appendChild(header);
+
+  // ── member tasks ─────────────────────────────────────────────────────────────
+  if (!group.collapsed) {
+    const memberUl = document.createElement('ul');
+    memberUl.className = 'group-members';
+
+    const members = group.taskIds
+      .map(id => sortedTodos.find(t => t.id === id))
+      .filter(Boolean);
+
+    for (const task of members) memberUl.appendChild(buildItem(task));
+    li.appendChild(memberUl);
+  }
+
+  return li;
+}
+
 function buildItem(todo) {
+  // When this task is the pending group target, show only the confirm prompt.
+  if (pendingGroup?.targetId === todo.id) {
+    const li = document.createElement('li');
+    li.className = 'todo-item group-confirm-item';
+    li.dataset.id = todo.id;
+
+    const label = document.createElement('span');
+    label.className   = 'group-confirm-label';
+    label.textContent = 'Confirm task group?';
+
+    const yes = document.createElement('button');
+    yes.className   = 'group-confirm-btn';
+    yes.textContent = 'y';
+    yes.addEventListener('click', async () => {
+      const { draggedId, targetId } = pendingGroup;
+      pendingGroup = null;
+      const g = await createGroup('group', targetId, draggedId);
+      editingGroupId = g.id;
+      renderTodos();
+    });
+
+    const no = document.createElement('button');
+    no.className   = 'group-confirm-btn';
+    no.textContent = 'n';
+    no.addEventListener('click', () => { pendingGroup = null; renderTodos(); });
+
+    li.append(label, yes, no);
+    return li;
+  }
+
   const isEditing = todo.id === editingId;
 
   const li = document.createElement('li');
@@ -296,9 +448,9 @@ function buildItem(todo) {
 
   if (!isEditing) {
     li.addEventListener('dragstart', e  => handleDragStart(e, todo));
-    li.addEventListener('dragover',  e  => handleDragOver(e, todo));
+    li.addEventListener('dragover',  e  => { handleDragOver(e, todo); e.stopPropagation(); });
     li.addEventListener('dragleave', e  => handleDragLeave(e));
-    li.addEventListener('drop',      e  => handleDrop(e, todo));
+    li.addEventListener('drop',      e  => { e.stopPropagation(); handleDrop(e, todo); });
     li.addEventListener('dragend',   () => clearDragState());
   }
 
@@ -454,37 +606,59 @@ function buildItem(todo) {
 
 // ── drag-and-drop ─────────────────────────────────────────────────────────────
 
+// Drop zone thresholds: top/bottom 20% = reorder, middle 60% = onto (group).
+const ONTO_TOP = 0.2;
+const ONTO_BOT = 0.8;
+
+function getDropZone(e) {
+  const rect = e.currentTarget.getBoundingClientRect();
+  const rel  = (e.clientY - rect.top) / rect.height;
+  return rel < ONTO_TOP ? 'above' : rel > ONTO_BOT ? 'below' : 'onto';
+}
+
 function handleDragStart(e, todo) {
-  dragId   = todo.id;
-  dragDate = todo.date ?? null;
-  dragTime = todo.time ?? null;
+  dragId      = todo.id;
+  dragDate    = todo.date ?? null;
+  dragTime    = todo.time ?? null;
+  dragGroupId = todo.groupId ?? null;
   e.dataTransfer.effectAllowed = 'move';
-  // Delay so the browser captures the ghost image before we fade the element.
   requestAnimationFrame(() => e.target.classList.add('dragging'));
 }
 
 function handleDragOver(e, todo) {
-  const sameTie = (todo.date ?? null) === dragDate && (todo.time ?? null) === dragTime;
-  if (!sameTie || todo.id === dragId) {
-    e.dataTransfer.dropEffect = 'none';
+  if (todo.id === dragId) { e.dataTransfer.dropEffect = 'none'; return; }
+
+  const pos = getDropZone(e);
+
+  if (pos === 'onto') {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    clearDropIndicators();
+    e.currentTarget.classList.add('drop-onto');
+    dropInfo = { id: todo.id, position: 'onto' };
     return;
   }
+
+  // above/below — gate logic
+  const sameGroup    = dragGroupId && dragGroupId === todo.groupId;
+  const fromGroup    = !!dragGroupId;
+  const bothUngrouped = !dragGroupId && !todo.groupId;
+  const sameTie      = (todo.date ?? null) === dragDate && (todo.time ?? null) === dragTime;
+
+  // Allow: same-group reorder, drag-out-of-group, ungrouped same-tied-group reorder
+  const allowed = sameGroup || (fromGroup && !todo.groupId) || (bothUngrouped && sameTie);
+  if (!allowed) { e.dataTransfer.dropEffect = 'none'; return; }
+
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-
-  const li  = e.currentTarget;
-  const mid = li.getBoundingClientRect().top + li.offsetHeight / 2;
-  const pos = e.clientY < mid ? 'above' : 'below';
-
   clearDropIndicators();
-  li.classList.add(pos === 'above' ? 'drop-above' : 'drop-below');
+  e.currentTarget.classList.add(pos === 'above' ? 'drop-above' : 'drop-below');
   dropInfo = { id: todo.id, position: pos };
 }
 
 function handleDragLeave(e) {
-  // Only clear when the pointer genuinely leaves this <li>, not its children.
   if (!e.currentTarget.contains(e.relatedTarget)) {
-    e.currentTarget.classList.remove('drop-above', 'drop-below');
+    e.currentTarget.classList.remove('drop-above', 'drop-below', 'drop-onto');
   }
 }
 
@@ -492,32 +666,69 @@ function handleDrop(e, todo) {
   e.preventDefault();
   if (!dragId || !dropInfo) { clearDragState(); return; }
 
-  // Rebuild the tied group from current state and reorder.
-  const group = sortTodos(
-    todos.filter(t => (t.date ?? null) === dragDate && (t.time ?? null) === dragTime)
-  );
-  const ids = group.map(t => t.id);
+  const { id: targetId, position } = dropInfo;
 
-  ids.splice(ids.indexOf(dragId), 1);
-  const targetIdx = ids.indexOf(dropInfo.id);
-  ids.splice(dropInfo.position === 'above' ? targetIdx : targetIdx + 1, 0, dragId);
+  if (position === 'onto') {
+    handleDropOnto(dragId, targetId);
+    clearDragState();
+    return;
+  }
 
-  reorderTiedGroup(ids); // onChanged → renderTodos()
+  const targetTodo = todos.find(t => t.id === targetId);
+
+  if (dragGroupId && dragGroupId === targetTodo?.groupId) {
+    // Reorder within same group
+    const grp = groups.find(g => g.id === dragGroupId);
+    if (grp) {
+      const ids = [...grp.taskIds];
+      ids.splice(ids.indexOf(dragId), 1);
+      const ti = ids.indexOf(targetId);
+      if (ti !== -1) ids.splice(position === 'above' ? ti : ti + 1, 0, dragId);
+      reorderGroupTasks(dragGroupId, ids);
+    }
+  } else if (dragGroupId && !targetTodo?.groupId) {
+    // Drag out of group — ungroup and drop into flat list at natural position
+    removeTaskFromGroup(dragId);
+  } else {
+    // Ungrouped reorder — existing tied-group logic
+    const tiedGroup = sortTodos(
+      todos.filter(t => !t.groupId && (t.date ?? null) === dragDate && (t.time ?? null) === dragTime)
+    );
+    const ids = tiedGroup.map(t => t.id);
+    ids.splice(ids.indexOf(dragId), 1);
+    const ti = ids.indexOf(targetId);
+    if (ti !== -1) ids.splice(position === 'above' ? ti : ti + 1, 0, dragId);
+    reorderTiedGroup(ids);
+  }
+
   clearDragState();
 }
 
+function handleDropOnto(draggedId, targetId) {
+  const targetTodo = todos.find(t => t.id === targetId);
+  if (targetTodo?.groupId) {
+    // Target already in a group — add dragged task to it
+    addTaskToGroup(draggedId, targetTodo.groupId);
+    return;
+  }
+  // Both ungrouped (or dragged from another group onto ungrouped task) — ask to confirm
+  pendingGroup = { draggedId, targetId };
+  renderTodos();
+}
+
 function clearDropIndicators() {
-  document.querySelectorAll('.drop-above, .drop-below')
-    .forEach(el => el.classList.remove('drop-above', 'drop-below'));
+  document.querySelectorAll('.drop-above, .drop-below, .drop-onto')
+    .forEach(el => el.classList.remove('drop-above', 'drop-below', 'drop-onto'));
 }
 
 function clearDragState() {
   clearDropIndicators();
   document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
-  dragId   = null;
-  dragDate = null;
-  dragTime = null;
-  dropInfo = null;
+  dragId      = null;
+  dragDate    = null;
+  dragTime    = null;
+  dragGroupId = null;
+  dropInfo    = null;
 }
 
 // ── mosaic rendering ──────────────────────────────────────────────────────────
