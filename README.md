@@ -6,11 +6,15 @@ Ultimate to-do manager built directly into your browser for easy access to tasks
 
 ## To-Do
 - Set due dates and deadlines
-- Mark priority tasks
+- Completed tasks are automatically cleared the next day
+- Highlight priority tasks
 - Organize tasks into:
   - Today
   - Archive
   - Upcoming
+
+  ### Group tasks
+  - Drag and drop tasks to create groups for better organization 
 
 ## Timer
 - Built-in Pomodoro-style timer
@@ -19,3 +23,6 @@ Ultimate to-do manager built directly into your browser for easy access to tasks
 ## Mosaic View
 - View visual progress of completed tasks
 - Track daily study and work sessions
+
+  ## Annual productivity tracker 
+  - Tracks how many work/study sessions completed + total hours 
