@@ -144,6 +144,14 @@ async function init() {
   if (!mosaic || !mosaic.activeImageId) autoLoadHeart();
 
   el.addForm.addEventListener('submit', handleAddTodo);
+  el.addInput.addEventListener('input', () => autoGrow(el.addInput));
+  // textarea doesn't submit on Enter by default — wire it up (Shift+Enter skips)
+  el.addInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (el.addInput.value.trim()) el.addForm.requestSubmit();
+    }
+  });
   el.dateToggle.addEventListener('click', handleDateToggle);
   el.addDate.addEventListener('change', () => {
     if (el.addDate.value) {
@@ -219,7 +227,8 @@ async function handleAddTodo(e) {
   const date = el.addDate.value || null;
   const time = (date && el.addTime.value) ? el.addTime.value : null;
 
-  el.addInput.value = '';
+  el.addInput.value        = '';
+  el.addInput.style.height = 'auto';
   el.addDate.value  = '';
   el.addTime.value  = '';
   el.addTime.classList.add('hidden');
@@ -275,6 +284,13 @@ function handleStorageChanged(changes, area) {
     focusSessions = changes.focusSessions.newValue ?? [];
     if (!el.viewMosaic.classList.contains('hidden')) renderSpiralView();
   }
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function autoGrow(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
 }
 
 // ── rendering ─────────────────────────────────────────────────────────────────
@@ -493,11 +509,13 @@ function buildItem(todo) {
     const wrap = document.createElement('div');
     wrap.className = 'todo-edit-wrap';
 
-    const titleIn = document.createElement('input');
-    titleIn.type         = 'text';
+    const titleIn = document.createElement('textarea');
     titleIn.className    = 'todo-edit-title';
     titleIn.value        = todo.title;
     titleIn.autocomplete = 'off';
+    titleIn.rows         = 1;
+    titleIn.spellcheck   = false;
+    titleIn.addEventListener('input', () => autoGrow(titleIn));
 
     const dateRow = document.createElement('div');
     dateRow.className = 'todo-edit-date-row';
@@ -557,7 +575,7 @@ function buildItem(todo) {
     };
 
     titleIn.addEventListener('keydown', e => {
-      if (e.key === 'Enter')  doSave();
+      if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
       if (e.key === 'Escape') { e.preventDefault(); doCancel(); }
     });
     [dateIn, timeIn].forEach(inp => inp.addEventListener('keydown', e => {
@@ -579,6 +597,7 @@ function buildItem(todo) {
     li.appendChild(wrap);
 
     requestAnimationFrame(() => {
+      autoGrow(titleIn);
       if (editingFocusDate) dateIn.focus();
       else { titleIn.focus(); titleIn.select(); }
       editingFocusDate = false;
@@ -1100,8 +1119,12 @@ function handleSpiralHover(e) {
   if (hit) {
     el.spiralTooltip.textContent = formatSpiralDot(hit.date, hit.minutes);
     el.spiralTooltip.classList.remove('hidden');
-    el.spiralTooltip.style.left = (e.clientX + 12) + 'px';
-    el.spiralTooltip.style.top  = Math.max(4, e.clientY - 32) + 'px';
+    const tw   = el.spiralTooltip.offsetWidth;
+    const th   = el.spiralTooltip.offsetHeight;
+    const left = Math.min(e.clientX + 12, window.innerWidth  - tw - 4);
+    const top  = Math.min(Math.max(4, e.clientY - 32), window.innerHeight - th - 4);
+    el.spiralTooltip.style.left = left + 'px';
+    el.spiralTooltip.style.top  = top  + 'px';
   } else {
     hideSpiralTooltip();
   }

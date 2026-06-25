@@ -75,6 +75,7 @@ html, body {
 
 .add-main-row {
   display: flex;
+  align-items: flex-start;
 }
 
 .add-input {
@@ -84,8 +85,11 @@ html, body {
   padding: 12px 14px;
   font: inherit;
   font-size: 13px;
+  line-height: 1.45;
   color: var(--ink);
   outline: none;
+  resize: none;
+  overflow: hidden;
 }
 
 .add-input::placeholder { color: var(--dim); }
@@ -102,6 +106,9 @@ html, body {
   cursor: pointer;
   white-space: nowrap;
   transition: color 0.12s;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
 }
 
 .date-toggle:hover { color: var(--ink); }
@@ -116,6 +123,10 @@ html, body {
   color: var(--dim);
   cursor: pointer;
   transition: color 0.12s;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .add-btn:hover { color: var(--ink); }
@@ -321,6 +332,9 @@ html, body {
   padding: 0 0 2px;
   width: 100%;
   line-height: 1.45;
+  resize: none;
+  overflow: hidden;
+  display: block;
 }
 
 .todo-edit-date-row {
