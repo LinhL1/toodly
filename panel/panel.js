@@ -134,7 +134,8 @@ async function autoLoadHeart() {
 
 async function init() {
   [todos, mosaic, focusSessions, groups] = await Promise.all([getTodos(), getMosaic(), getFocusSessions(), getGroups()]);
-  await clearCompletedBefore(getTodayDateString()); // sweep tasks completed on prior days
+  await clearCompletedBefore(getTodayDateString());              // sweep tasks completed on prior days
+  [todos, groups] = await Promise.all([getTodos(), getGroups()]); // reload so renderTodos sees the clean list
   await reorderMosaicBottomUp();                    // migrate existing mosaic to bottom-up fill
   renderTodos();
   startClock();
@@ -183,8 +184,12 @@ async function init() {
     );
   }
 
-  // Recompute sections and sweep old completed tasks in case the panel stays open past midnight.
-  setInterval(() => { renderTodos(); clearCompletedBefore(getTodayDateString()); }, 3 * 60 * 1000);
+  // Sweep old completed tasks and recompute sections when the panel stays open past midnight.
+  setInterval(async () => {
+    await clearCompletedBefore(getTodayDateString());
+    [todos, groups] = await Promise.all([getTodos(), getGroups()]);
+    renderTodos();
+  }, 3 * 60 * 1000);
 }
 
 // ── tab switching ─────────────────────────────────────────────────────────────
@@ -390,14 +395,15 @@ function buildGroupItem(group, sortedTodos) {
     pinBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="3.5" cy="3.5" r="2.5" fill="currentColor"/><line x1="5.5" y1="5.5" x2="8.5" y2="8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     pinBtn.addEventListener('click', () => toggleGroupPinned(group.id));
 
-    const ungroupBtn = document.createElement('button');
-    ungroupBtn.className   = 'group-ungroup';
-    ungroupBtn.textContent = 'ungroup';
-    ungroupBtn.addEventListener('click', () => dissolveGroup(group.id));
+    const trashBtn = document.createElement('button');
+    trashBtn.className = 'group-trash';
+    trashBtn.title     = 'remove group';
+    trashBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="1" y1="3" x2="9" y2="3"/><path d="M3.5 3V2h3v1"/><path d="M2.5 3.5l.5 5.5h4l.5-5.5"/></svg>';
+    trashBtn.addEventListener('click', () => dissolveGroup(group.id));
 
     header.appendChild(nameSpan);
     header.appendChild(pinBtn);
-    header.appendChild(ungroupBtn);
+    header.appendChild(trashBtn);
   }
 
   // ── header as drop target (add any dragged task to this group) ───────────────

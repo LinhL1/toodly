@@ -496,6 +496,7 @@ html, body {
 }
 
 .group-pin,
+.group-trash,
 .group-ungroup {
   background: none;
   border: none;
@@ -511,8 +512,10 @@ html, body {
   transition: opacity 0.12s, color 0.12s;
 }
 .group-header:hover .group-pin,
+.group-header:hover .group-trash,
 .group-header:hover .group-ungroup { opacity: 1; }
 .group-pin:hover,
+.group-trash:hover,
 .group-ungroup:hover { color: var(--ink); }
 
 /* bold pin icon when group is pinned */
